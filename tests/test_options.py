@@ -1199,6 +1199,63 @@ def test_missing_envvar_sequence(runner, envvar, expected):
     assert f"Error: Missing option {expected}." in result.output
 
 
+def test_envvar_error_hint_auto_prefix(runner):
+    @click.command(context_settings={"auto_envvar_prefix": "MYAPP"})
+    @click.option("--port", type=int, required=True, show_envvar=True)
+    def cli(port):
+        click.echo(f"port={port}")
+
+    result = runner.invoke(cli, [])
+    assert result.exit_code == 2
+    assert "Error: Missing option '--port' (env var: 'MYAPP_PORT')." in result.output
+
+    bad_cli = runner.invoke(cli, ["--port", "abc"])
+    assert bad_cli.exit_code == 2
+    assert "Invalid value for '--port' (env var: 'MYAPP_PORT'):" in bad_cli.output
+
+    bad_env = runner.invoke(cli, [], env={"MYAPP_PORT": "abc"})
+    assert bad_env.exit_code == 2
+    assert "Invalid value for '--port' (env var: 'MYAPP_PORT'):" in bad_env.output
+
+
+def test_envvar_error_hint_auto_prefix_edge_cases(runner):
+    @click.group()
+    def grp():
+        pass
+
+    @grp.command("foo-bar")
+    @click.option("--baz", required=True, show_envvar=True)
+    def foo_bar(baz):
+        pass
+
+    sub_result = runner.invoke(grp, ["foo-bar"], auto_envvar_prefix="TEST")
+    assert sub_result.exit_code == 2
+    assert (
+        "Error: Missing option '--baz' (env var: 'TEST_FOO_BAR_BAZ')."
+        in sub_result.output
+    )
+
+    no_auto = click.Option(
+        ["--port"], show_envvar=True, required=True, allow_from_autoenv=False
+    )
+    no_auto_result = runner.invoke(
+        click.Command("cli", params=[no_auto]), [], auto_envvar_prefix="MYAPP"
+    )
+    assert no_auto_result.exit_code == 2
+    assert no_auto_result.output.strip().endswith("Error: Missing option '--port'.")
+
+    empty_opt = click.Option(["--units"], envvar=[], show_envvar=True, required=True)
+    empty_result = runner.invoke(
+        click.Command("cli", params=[empty_opt]), [], auto_envvar_prefix="WEATHER"
+    )
+    assert empty_result.exit_code == 2
+    assert (
+        "Error: Missing option '--units' (env var: 'WEATHER_UNITS')."
+        in empty_result.output
+    )
+    assert empty_opt.get_error_hint(None) == "'--units'"
+
+
 def test_case_insensitive_choice(runner):
     @click.command()
     @click.option("--foo", type=click.Choice(["Orange", "Apple"], case_sensitive=False))
